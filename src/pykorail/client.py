@@ -10,10 +10,11 @@ import re
 from typing import TYPE_CHECKING
 
 from pykorail.api import ApiClient
-from pykorail.auth.dynapath import DynaPathMasterEngine
+from pykorail.auth.declaration import DeclarationDynaPathEngine
 from pykorail.auth.signer import RequestSigner
 from pykorail.constants import (
     API_ENDPOINTS,
+    APP_DISPLAY_VERSION,
     APP_VERSION,
     DEFAULT_HEADERS,
     EMAIL_REGEX,
@@ -31,6 +32,7 @@ from pykorail.transport import create_session
 if TYPE_CHECKING:
     from types import TracebackType
 
+    from pykorail.auth.declaration import DynaPathEngine
     from pykorail.device import DeviceProfileLike
 
 
@@ -71,6 +73,7 @@ class Korail:
         *,
         android_id: str | None = None,
         request_settings: RequestSettings | None = None,
+        dynapath_engine: DynaPathEngine | None = None,
     ) -> None:
         settings = request_settings or RequestSettings()
         self._android_id = generate_android_id() if android_id is None else validate_android_id(android_id)
@@ -88,9 +91,9 @@ class Korail:
             )
         if settings.os_version is not None or settings.os_type is not None:
             os_version = settings.os_version or (
-                device_profile.android if device_profile is not None else DynaPathMasterEngine.OS_VERSION
+                device_profile.android if device_profile is not None else DeclarationDynaPathEngine.OS_VERSION
             )
-            os_type = settings.os_type or DynaPathMasterEngine.OS_TYPE
+            os_type = settings.os_type or DeclarationDynaPathEngine.OS_TYPE
             headers["User-Agent"] = re.sub(
                 r"; U; [^;]+;",
                 lambda match: f"; U; {os_type} {os_version};",
@@ -99,7 +102,9 @@ class Korail:
 
         self._api = ApiClient(
             create_session(headers),
-            RequestSigner(device_profile, device_id=self._android_id, request_settings=settings),
+            RequestSigner(
+                device_profile, device_id=self._android_id, request_settings=settings, engine=dynapath_engine
+            ),
             verbose,
             app_version=settings.app_version or APP_VERSION,
         )
@@ -121,6 +126,7 @@ class Korail:
         validate_stations: bool = True,
         android_id: str | None = None,
         request_settings: RequestSettings | None = None,
+        dynapath_engine: DynaPathEngine | None = None,
     ) -> Korail:
         """클라이언트를 만들고 곧바로 로그인합니다.
 
@@ -136,6 +142,7 @@ class Korail:
             validate_stations=validate_stations,
             android_id=android_id,
             request_settings=request_settings,
+            dynapath_engine=dynapath_engine,
         )
         try:
             korail.login(korail_id, korail_pw)
@@ -255,17 +262,16 @@ class Korail:
         idx, encrypted_pw = self._encrypt_password(korail_pw)
 
         url = API_ENDPOINTS["login"]
-        headers, sid = self._api.sign(url)
+        headers, _ = self._api.sign(url, include_sid=False)
         data = {
             **self._api.base_payload(),
+            "AppVersion": APP_DISPLAY_VERSION,
+            "checkValidPw": "Y",
             "txtMemberNo": korail_id,
             "txtPwd": encrypted_pw,
             "txtInputFlg": input_flag,
             "idx": idx,
         }
-        if sid:
-            data["Sid"] = sid
-
         payload = self._api.post(url, data=data, headers=headers)
         account = self._api.account
 

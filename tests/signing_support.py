@@ -4,6 +4,19 @@ from __future__ import annotations
 
 from threading import Event, Lock
 
+from pykorail.auth.dynapath import DynaPathMasterEngine
+
+
+class LegacyEngineAdapter:
+    """변경 전 엔진으로 생성한 요청과 폼을 비교하기 위한 어댑터."""
+
+    def __init__(self) -> None:
+        self._engine = DynaPathMasterEngine()
+
+    def generate_token_with_timestamp(self, *, request_bound: bool, op_id: int, device_id: str) -> tuple[str, int]:
+        """기존 엔진의 호출 형태만 새 엔진 계약에 맞춥니다."""
+        return self._engine.generate_token_with_timestamp(device_id, "AB12")
+
 
 class ReverseFirstTwoLock:
     """첫 호출을 두 번째 호출의 잠금 해제까지 대기시킵니다. sleep을 쓰지 않습니다."""

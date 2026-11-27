@@ -28,7 +28,7 @@ from __future__ import annotations
 from importlib import metadata
 
 from pykorail import _compat as _compat  # 최소 파이썬 버전 강제 — 다른 임포트보다 먼저
-from pykorail.auth import NetFunnelHelper
+from pykorail.auth import DeclarationDynaPathEngine, DynaPathEngine, NetFunnelHelper
 from pykorail.client import Korail
 from pykorail.device import DeviceProfile, DeviceProfileLike, profile_by_id, random_profile
 from pykorail.exceptions import (
@@ -91,10 +91,12 @@ __all__ = [
     "AdultPassenger",
     "Card",
     "ChildPassenger",
+    "DeclarationDynaPathEngine",
     "DeviceProfile",
     "DeviceProfileLike",
     "Disability1To3Passenger",
     "Disability4To6Passenger",
+    "DynaPathEngine",
     "HttpStatusError",
     "Korail",
     "KorailError",

@@ -11,12 +11,13 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from pykorail.auth.dynapath import DynaPathMasterEngine
-from pykorail.constants import APP_VERSION, SID_KEY
+from pykorail.auth.declaration import DeclarationDynaPathEngine
+from pykorail.constants import APP_VERSION, DYNAPATH_SDK_VERSION, SID_KEY
 from pykorail.device.android_id import generate_android_id, validate_android_id
 from pykorail.device.request_settings import RequestSettings
 
 logger = logging.getLogger(__name__)
+_PRESERVED_FIELDS = ("android_id", "default_android_id", "request_settings", "sdk_default_version")
 
 
 class StorageDecryptError(Exception):
@@ -63,12 +64,11 @@ def save(telegram_id: int, data: dict) -> None:
     data = dict(data)
     previous = (
         json.loads(_get_cipher().decrypt(_path(telegram_id).read_bytes()).decode("utf-8"))
-        if any(field not in data for field in ("android_id", "default_android_id", "request_settings"))
-        and exists(telegram_id)
+        if any(field not in data for field in _PRESERVED_FIELDS) and exists(telegram_id)
         else None
     )
     if previous is not None:
-        for field in ("android_id", "default_android_id", "request_settings"):
+        for field in _PRESERVED_FIELDS:
             if field not in data and field in previous:
                 data[field] = previous[field]
     plaintext = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -105,25 +105,37 @@ def load(telegram_id: int) -> dict | None:
 
 
 def _migrate_in_place(data: dict) -> bool:
-    """legacy `card` 키를 `cards` 리스트로 변환. 변경되었으면 True."""
+    """legacy `card` 키와 이전 기본 SDK 기준의 수동 `sdk_version` 설정을 마이그레이션. 변경되었으면 True."""
+    changed = False
     has_legacy = "card" in data
     has_new = "cards" in data and data["cards"] is not None
 
     if has_legacy and has_new:
         logger.warning("legacy card와 cards 동시 존재 — card 무시")
         del data["card"]
-        return True
-
-    if has_legacy and not has_new:
+        changed = True
+    elif has_legacy and not has_new:
         legacy = data.pop("card")
         if legacy:
             new_card = {"id": _fresh_card_id(set()), "label": None, **legacy}
             data["cards"] = [new_card]
         else:
             data["cards"] = []
-        return True
+        changed = True
 
-    return False
+    overrides = data.get("request_settings")
+    if (
+        isinstance(overrides, dict)
+        and "sdk_version" in overrides
+        and data.get("sdk_default_version") != DYNAPATH_SDK_VERSION
+    ):
+        # 기본 SDK 버전 상향 시 이전 버전에서 수동 저장된 SDK 설정이 남지 않도록 1회 기본값으로 복원합니다.
+        overrides.pop("sdk_version", None)
+        data["sdk_default_version"] = DYNAPATH_SDK_VERSION
+        logger.info("이전 수동 SDK version 설정을 기본값(%s)으로 복원", DYNAPATH_SDK_VERSION)
+        changed = True
+
+    return changed
 
 
 def _fresh_card_id(existing_ids: set[str]) -> str:
@@ -164,10 +176,10 @@ def request_values_for(telegram_id: int) -> dict[str, str]:
     """현재 사용자 설정을 기존 상수 기본값과 합쳐 반환합니다."""
     identity = android_id_for(telegram_id)
     values = {
-        "device_model": DynaPathMasterEngine.DEVICE_MODEL,
-        "os_version": DynaPathMasterEngine.OS_VERSION,
-        "os_type": DynaPathMasterEngine.OS_TYPE,
-        "sdk_version": DynaPathMasterEngine.SDK_VERSION,
+        "device_model": DeclarationDynaPathEngine.DEVICE_MODEL,
+        "os_version": DeclarationDynaPathEngine.OS_VERSION,
+        "os_type": DeclarationDynaPathEngine.OS_TYPE,
+        "sdk_version": DeclarationDynaPathEngine.SDK_VERSION,
         "app_version": APP_VERSION,
         "sid_key": SID_KEY.decode("ascii"),
     }
@@ -219,6 +231,9 @@ def set_request_value(telegram_id: int, field: str, value: str | None, *, regene
         overrides.pop(field, None)
     else:
         overrides[field] = value
+    if field == "sdk_version":
+        # 현재 기본 SDK 버전 기준으로 사용자가 직접 지정/복원했음을 기록해 재로드 시 유지합니다.
+        data["sdk_default_version"] = DYNAPATH_SDK_VERSION
     data["request_settings"] = overrides
     save(telegram_id, data)
 

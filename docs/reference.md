@@ -16,6 +16,10 @@ Korail(
     verbose: bool = False,
     device_profile: DeviceProfileLike | None = None,
     validate_stations: bool = True,
+    *,
+    android_id: str | None = None,
+    request_settings: RequestSettings | None = None,
+    dynapath_engine: DynaPathEngine | None = None,
 )
 ```
 
@@ -24,6 +28,9 @@ Korail(
 | `verbose` | 요청·응답 본문을 `DEBUG` 로그로 남깁니다. **개인정보가 찍히니 운영에서 켜지 마세요.** |
 | `device_profile` | User-Agent 와 DynaPath 서명을 함께 바꿉니다. [기기 프로파일](#기기-프로파일) 참조. |
 | `validate_stations` | `trains.search` 전에 역 이름을 검증합니다. 끄면 역 마스터 조회 1회를 아낍니다. |
+| `android_id` | 저장해 재사용할 소문자 16자리 16진수 기기 ID. 생략하면 생성합니다. |
+| `request_settings` | 사용자별 모델·OS·SDK·API 버전·Sid key 설정. |
+| `dynapath_engine` | 기본 v2 선언 토큰 엔진을 교체합니다. `logged_in`에도 전달할 수 있습니다. |
 
 | 메서드 · 속성 | 반환 | 설명 |
 | --- | --- | --- |
@@ -39,6 +46,29 @@ Korail(
 > [!NOTE]
 > `logout()` 과 `close()` 는 다릅니다. 로그아웃은 프로토콜 상태, 연결은 자원이라
 > 수명이 다릅니다. 계정을 바꿔 다시 로그인하려면 연결이 살아 있어야 합니다.
+
+### DynaPath 인증
+
+기본 `DeclarationDynaPathEngine`은 pykorail **v0.6.0 / 030576a**에서 이식한
+코덱을 기반으로 코레일톡+ 7.1.3의 SDK **2.0.2** 선언 토큰을 생성합니다.
+사용자별 Device ID는 토큰의 `iid`에 문자열 바이트로 반영하며 재사용합니다.
+시각과 32비트 난수 nonce는 요청마다 새로 생성합니다.
+
+로그인은 `AppVersion=7.1.3`, `checkValidPw=Y`를 보내고 `Sid`는 보내지 않습니다.
+기존 API의 `Version=250722001`은 별개이며 유지합니다. 조회의 빈 `Sid`와
+`Key` 생략, 예매의 폼 필드도 유지합니다.
+
+하드웨어 TEE/StrongBox 인증서 체인이나 Flow-2 서명은 구현하지 않습니다.
+서버가 이를 강제하면 선언 토큰만으로는 인증되지 않습니다. 이 프로젝트에서
+실제 로그인·예매로 수용 여부를 검증하지는 않았습니다.
+엔진을 교체하려면 `DynaPathEngine` 계약의
+`generate_token_with_timestamp(*, request_bound, op_id, device_id)`를 구현해
+`(token: str, timestamp_ms: int)`를 반환하세요.
+
+출처: [v0.6.0 릴리스](https://github.com/devgyurak/pykorail/releases/tag/v0.6.0),
+[인증 구현 PR #155](https://github.com/devgyurak/pykorail/pull/155).
+가져온 코드의 라이선스 조건은 [LICENSE](../LICENSE)와
+[출처 고지](../THIRD_PARTY_NOTICES.md)에 보존했습니다.
 
 ### `korail.stations`
 

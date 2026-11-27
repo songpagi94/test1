@@ -2,27 +2,23 @@
 
 from __future__ import annotations
 
-import random
-import string
 from typing import TYPE_CHECKING
 
-from pykorail.auth.dynapath import DynaPathMasterEngine
-from pykorail.constants import DEVICE, DYNAPATH_PATHS, SID_KEY
+from pykorail.auth.declaration import DeclarationDynaPathEngine, _sdk_for
+from pykorail.constants import DEVICE, DYNAPATH_LOGIN_OP, DYNAPATH_PATHS, SID_KEY
 from pykorail.crypto import encrypt_sid
-from pykorail.device.android_id import generate_android_id
+from pykorail.device.android_id import generate_android_id, validate_android_id
 from pykorail.device.request_settings import RequestSettings
 
 if TYPE_CHECKING:
+    from pykorail.auth.declaration import DynaPathEngine
     from pykorail.device import DeviceProfileLike
-
-_NONCE_ALPHABET = string.ascii_uppercase + string.digits
 
 
 class RequestSigner:
     """DynaPath 서명이 필요한 요청에 헤더와 ``Sid`` 를 만들어 줍니다.
 
-    엔진 인스턴스를 들고 있으므로 클라이언트당 하나만 두고 재사용하세요 —
-    엔진 생성 시각이 서명에 들어갑니다.
+    기본은 v2 선언 토큰입니다. 하드웨어 KeyStore 서명을 재현하지는 않습니다.
     """
 
     def __init__(
@@ -33,19 +29,31 @@ class RequestSigner:
         sid_key: bytes = SID_KEY,
         *,
         request_settings: RequestSettings | None = None,
+        engine: DynaPathEngine | None = None,
     ) -> None:
         settings = request_settings or RequestSettings()
-        self._engine = DynaPathMasterEngine(
-            device_model=settings.device_model or (profile.model if profile is not None else None),
-            os_version=settings.os_version or (profile.android if profile is not None else None),
-            os_type=settings.os_type,
-            sdk_version=settings.sdk_version,
+        model = settings.device_model or (
+            profile.model if profile is not None else DeclarationDynaPathEngine.DEVICE_MODEL
+        )
+        release = settings.os_version or (
+            profile.android if profile is not None else DeclarationDynaPathEngine.OS_VERSION
+        )
+        self._engine: DynaPathEngine = (
+            engine
+            if engine is not None
+            else DeclarationDynaPathEngine(
+                model=model.encode("utf-8"),
+                release=release.encode("ascii"),
+                sdk_int=_sdk_for(release),
+                os_type=settings.os_type or DeclarationDynaPathEngine.OS_TYPE,
+                sdk_version=settings.sdk_version or DeclarationDynaPathEngine.SDK_VERSION,
+            )
         )
         self._device = device
-        self._device_id = generate_android_id() if device_id is None else device_id
+        self._device_id = generate_android_id() if device_id is None else validate_android_id(device_id)
         self._sid_key = settings.sid_key if settings.sid_key is not None else sid_key
 
-    def sign(self, url: str) -> tuple[dict[str, str], str | None]:
+    def sign(self, url: str, *, include_sid: bool = True) -> tuple[dict[str, str], str | None]:
         """``url`` 에 필요한 ``(헤더, Sid)`` 를 만듭니다.
 
         서명 대상이 아닌 경로면 ``({}, None)`` 을 돌려줍니다. 토큰과 ``Sid`` 는
@@ -54,6 +62,10 @@ class RequestSigner:
         if not any(path in url for path in DYNAPATH_PATHS):
             return {}, None
 
-        nonce = "".join(random.choices(_NONCE_ALPHABET, k=4))
-        token, ts = self._engine.generate_token_with_timestamp(self._device_id, nonce)
-        return {"x-dynapath-m-token": token}, encrypt_sid(self._device, ts, self._sid_key)
+        token, ts = self._engine.generate_token_with_timestamp(
+            request_bound="/classes/com.korail.mobile.login.Login" in url,
+            op_id=DYNAPATH_LOGIN_OP,
+            device_id=self._device_id,
+        )
+        sid = encrypt_sid(self._device, ts, self._sid_key) if include_sid else None
+        return {"x-dynapath-m-token": token}, sid

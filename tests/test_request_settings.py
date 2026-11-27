@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from urllib.parse import parse_qsl
 
 import pytest
 from telegram.ext import ConversationHandler
@@ -16,7 +15,7 @@ from pykorail.device.request_settings import RequestSettings
 from srtgo.bot import device_settings as ui
 from srtgo.bot import storage
 from tests.conftest import FakeSession
-from tests.dynapath_decoder import decode_token
+from tests.declaration_decoder import decode_declaration, decoded_field
 from tests.mytrail_support import context, update
 from tests.payloads import CIPHER_PAYLOAD, LOGIN_OK, SEARCH_PAYLOAD
 
@@ -104,7 +103,7 @@ def test_sid_key_is_hidden_from_settings_repr() -> None:
 
 def test_signature_uses_custom_fields_sdk_and_sid_key(monkeypatch) -> None:
     # given
-    monkeypatch.setattr("pykorail.auth.dynapath.time.time", lambda: 1_700_000_000)
+    monkeypatch.setattr("pykorail.auth.declaration.time.time", lambda: 1_700_000_000)
     settings = RequestSettings(
         device_model="SM-TEST",
         os_version="14",
@@ -116,16 +115,13 @@ def test_signature_uses_custom_fields_sdk_and_sid_key(monkeypatch) -> None:
     # when
     headers, sid = signer.sign(API_ENDPOINTS["login"])
     # then
-    key, body = decode_token(headers["x-dynapath-m-token"])
-    fields = dict(parse_qsl(body))
-    assert key.startswith("v1.0.4+")
-    assert {name: fields[name] for name in ("dm", "os", "st", "sv", "di")} == {
+    fields = decode_declaration(headers["x-dynapath-m-token"])
+    assert {name: decoded_field(fields, name) for name in ("dm", "os", "iid")} == {
         "dm": "SM-TEST",
         "os": "14",
-        "st": "TestOS",
-        "sv": "v1.0.4",
-        "di": "0123456789abcdef",
+        "iid": "0123456789abcdef",
     }
+    assert (fields["st"], fields["sv"], fields["sl"]) == ("TestOS", "v1.0.4", "34")
     assert sid == encrypt_sid("AD", 1_700_000_000_000, b"0123456789abcdef")
 
 
@@ -149,8 +145,8 @@ def test_custom_app_version_reaches_login_and_search(make_korail) -> None:
 
 def test_default_settings_preserve_full_login_request(monkeypatch, trail_env) -> None:
     # given
-    monkeypatch.setattr("pykorail.auth.dynapath.time.time", lambda: 1_700_000_000)
-    monkeypatch.setattr("pykorail.auth.signer.random.choices", lambda *args, **kwargs: list("AB12"))
+    monkeypatch.setattr("pykorail.auth.declaration.time.time", lambda: 1_700_000_000)
+    monkeypatch.setattr("pykorail.auth.declaration.secrets.randbits", lambda bits: 5)
     original = FakeSession({"code": CIPHER_PAYLOAD, "login": LOGIN_OK})
     configured = FakeSession({"code": CIPHER_PAYLOAD, "login": LOGIN_OK})
     sessions = iter([original, configured])
@@ -182,8 +178,14 @@ def test_custom_model_and_os_are_consistent_in_headers_and_signature(monkeypatch
     client = Korail(request_settings=settings)
     # then
     assert "TestOS 14; SM-TEST Build/" in captured["User-Agent"]
-    assert client._api._signer._engine.device_model == "SM-TEST"
-    assert client._api._signer._engine.os_version == "14"
+    assert (
+        decoded_field(decode_declaration(client._api.sign(API_ENDPOINTS["login"])[0]["x-dynapath-m-token"]), "dm")
+        == "SM-TEST"
+    )
+    assert (
+        decoded_field(decode_declaration(client._api.sign(API_ENDPOINTS["login"])[0]["x-dynapath-m-token"]), "os")
+        == "14"
+    )
 
 
 @pytest.mark.parametrize(("field", "value"), CASES)
@@ -233,3 +235,34 @@ def test_device_id_field_has_regeneration_and_default_restore() -> None:
         "기본값으로 복원",
         "돌아가기",
     ]
+
+
+@pytest.mark.parametrize("stale_sdk", ["v1.0.3", "2.0.1", "2.0.0"])
+def test_stale_manual_sdk_version_migrates_to_current_default(trail_env, stale_sdk) -> None:
+    # given
+    storage.save(
+        111,
+        {
+            "ktx": None,
+            "cards": [],
+            "android_id": "fedcba9876543210",
+            "default_android_id": "fedcba9876543210",
+            "request_settings": {"sdk_version": stale_sdk, "device_model": "SM-TEST"},
+        },
+    )
+    # when
+    values = storage.request_values_for(111)
+    # then
+    assert values["sdk_version"] == "2.0.2"
+    assert values["device_model"] == "SM-TEST"
+    assert values["device_id"] == "fedcba9876543210"
+
+
+def test_post_upgrade_manual_sdk_override_persists_across_registration(trail_env) -> None:
+    # given
+    storage.set_request_value(111, "sdk_version", "2.0.1")
+    # when
+    storage.save(111, {"ktx": {"id": "test@example.test"}, "cards": []})
+    values = storage.request_values_for(111)
+    # then
+    assert values["sdk_version"] == "2.0.1"

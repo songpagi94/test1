@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from pykorail.auth.declaration import DeclarationDynaPathEngine, DynaPathEngine
 from pykorail.auth.dynapath import DynaPathMasterEngine
 from pykorail.auth.netfunnel import NetFunnelHelper
 from pykorail.auth.signer import RequestSigner
 
-__all__ = ["DynaPathMasterEngine", "NetFunnelHelper", "RequestSigner"]
+__all__ = ["DeclarationDynaPathEngine", "DynaPathEngine", "DynaPathMasterEngine", "NetFunnelHelper", "RequestSigner"]

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 
 from pykorail.client import Korail
-from pykorail.constants import API_ENDPOINTS, API_KEY, APP_VERSION, DEVICE
+from pykorail.constants import API_ENDPOINTS, API_KEY, APP_DISPLAY_VERSION, APP_VERSION, DEVICE
 from pykorail.crypto import encrypt_password
 from pykorail.exceptions import LoginFailedError
+from tests.declaration_decoder import decode_declaration, decoded_field
 from tests.payloads import (
     CIPHER_PAYLOAD,
     LOGIN_FAIL,
@@ -138,7 +141,7 @@ class TestLogin:
         # then
         assert session.kwargs_for("login")["data"]["txtInputFlg"] == expected_flag
 
-    def test_login_is_signed_and_carries_sid(self, make_korail) -> None:
+    def test_login_is_signed_without_sid(self, make_korail) -> None:
         # given
         client, session = make_korail({"code": CIPHER_PAYLOAD, "login": LOGIN_OK})
 
@@ -148,7 +151,8 @@ class TestLogin:
         # then
         kwargs = session.kwargs_for("login")
         assert "x-dynapath-m-token" in kwargs["headers"]
-        assert kwargs["data"]["Sid"]
+        assert "Sid" not in kwargs["data"]
+        assert kwargs["headers"]["x-dynapath-m-token"].startswith("201")
 
     @pytest.mark.parametrize("sid", [None, "", "signed-sid\n"])
     @pytest.mark.parametrize("cipher_payload", [CIPHER_PAYLOAD, NUMERIC_IDX_CIPHER_PAYLOAD])
@@ -156,7 +160,8 @@ class TestLogin:
         # given
         client, session = make_korail({"code": cipher_payload, "login": LOGIN_OK})
         headers = {"x-dynapath-m-token": "fixed-token"}
-        monkeypatch.setattr(client._api._signer, "sign", lambda url: (headers, sid))
+        sign = Mock(return_value=(headers, sid))
+        monkeypatch.setattr(client._api._signer, "sign", sign)
         cipher = cipher_payload["app.login.cphd"]
         expected_data = {
             "Device": DEVICE,
@@ -166,13 +171,15 @@ class TestLogin:
             "txtPwd": encrypt_password("pw", cipher["key"]),
             "txtInputFlg": "5",
             "idx": str(cipher["idx"]),
-            **({"Sid": sid} if sid else {}),
+            "AppVersion": APP_DISPLAY_VERSION,
+            "checkValidPw": "Y",
         }
 
         # when
         client.login("me@example.com", "pw")
 
         # then
+        sign.assert_called_once_with(API_ENDPOINTS["login"], include_sid=False)
         assert session.calls == [
             ("POST", API_ENDPOINTS["code"], {"data": {"code": "app.login.cphd"}}),
             ("POST", API_ENDPOINTS["login"], {"data": expected_data, "headers": headers}),
@@ -405,9 +412,9 @@ class TestDeviceProfile:
         # then
         assert captured["User-Agent"] == "Dalvik/2.1.0 (Linux; U; Android 15; SM-G991N Build/AP3A.240905.015.A2)"
         # UA 와 서명이 같은 기기를 가리켜야 합니다.
-        engine = client._api._signer._engine
-        assert engine.device_model == "SM-G991N"
-        assert engine.os_version == "15"
+        fields = decode_declaration(client._api.sign(API_ENDPOINTS["login"])[0]["x-dynapath-m-token"])
+        assert decoded_field(fields, "dm") == "SM-G991N"
+        assert decoded_field(fields, "os") == "15"
 
     def test_default_headers_are_not_mutated(self, make_korail) -> None:
         # given

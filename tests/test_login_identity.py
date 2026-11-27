@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from unittest.mock import Mock
-from urllib.parse import parse_qsl
 
 import pytest
 
@@ -16,7 +15,7 @@ from pykorail.device.android_id import generate_android_id, validate_android_id
 from srtgo.bot import storage
 from srtgo.bot.errors import safe_error
 from srtgo.rail.ktx import client as adapter
-from tests.dynapath_decoder import decode_token
+from tests.declaration_decoder import decode_declaration, decoded_field
 from tests.payloads import LOGIN_FORBIDDEN
 
 
@@ -41,23 +40,23 @@ def test_signer_keeps_identity_across_requests() -> None:
     # when
     headers = [signer.sign(API_ENDPOINTS["login"])[0], signer.sign(API_ENDPOINTS["login"])[0]]
     # then
-    ids = [dict(parse_qsl(decode_token(item["x-dynapath-m-token"])[1]))["di"] for item in headers]
+    ids = [decoded_field(decode_declaration(item["x-dynapath-m-token"]), "iid") for item in headers]
     assert ids == [signer._device_id, signer._device_id]
 
 
 def test_identity_change_preserves_other_signature_fields_and_sid(monkeypatch) -> None:
     # given
-    monkeypatch.setattr("pykorail.auth.dynapath.time.time", lambda: 1_700_000_000)
-    monkeypatch.setattr("pykorail.auth.signer.random.choices", lambda *args, **kwargs: list("AB12"))
+    monkeypatch.setattr("pykorail.auth.declaration.time.time", lambda: 1_700_000_000)
+    monkeypatch.setattr("pykorail.auth.declaration.secrets.randbits", lambda bits: 5)
     old = RequestSigner(device_id="558a4f02041657ea")
     new = RequestSigner(device_id=generate_android_id())
     # when
     results = [old.sign(API_ENDPOINTS["login"]), new.sign(API_ENDPOINTS["login"])]
     # then
-    fields = [dict(parse_qsl(decode_token(headers["x-dynapath-m-token"])[1])) for headers, _ in results]
-    assert fields[0]["di"] != fields[1]["di"]
-    assert [{key: value for key, value in item.items() if key != "di"} for item in fields] == [
-        {key: value for key, value in fields[0].items() if key != "di"}
+    fields = [decode_declaration(headers["x-dynapath-m-token"]) for headers, _ in results]
+    assert fields[0]["iid"] != fields[1]["iid"]
+    assert [{key: value for key, value in item.items() if key != "iid"} for item in fields] == [
+        {key: value for key, value in fields[0].items() if key != "iid"}
     ] * 2
     assert results[0][1] == results[1][1]
 

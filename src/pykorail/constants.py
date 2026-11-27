@@ -66,6 +66,13 @@ API_ENDPOINTS: Final[dict[str, str]] = {
 # --------------------------------------------------------------- 앱 신원값
 DEVICE: Final = "AD"
 APP_VERSION: Final = "250722001"
+APP_DISPLAY_VERSION: Final = "7.1.3"
+
+# API Version과 별개인 DynaPath v2 선언 봉투의 식별값입니다.
+DYNAPATH_SDK_VERSION: Final = "2.0.2"
+DYNAPATH_APP_ID: Final = "korailplus"
+DYNAPATH_LOGIN_OP: Final = 288904575606514493
+TOKEN_PREFIX: Final = "201"
 API_KEY: Final = "korail1234567890"
 SID_KEY: Final = b"2485dd54d9deaa36"
 DEVICE_ID: Final = "558a4f02041657ea"

@@ -6,14 +6,13 @@ dynamic = ["version"]
 description = "코레일(KTX) 스마트 예매 비공식 Python 클라이언트"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "pykorail License — see LICENSE" }
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "devgyurak", email = "devgyurak@gmail.com" }]
 keywords = ["korail", "ktx", "letskorail", "train", "reservation", "korea"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Natural Language :: Korean",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
